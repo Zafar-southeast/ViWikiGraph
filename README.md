@@ -1,186 +1,181 @@
-````markdown
-# ViWikiGraph
+# ViWikiGraph — Video-to-Wiki QA
 
-## Cross-Modal Video-to-Wiki Generation for Evidence-Grounded VideoQA
+A **RAG-only** pipeline that turns each video's dataset-provided features into a small,
+provenance-tracked "wiki" — narrative sections plus a knowledge graph — and then answers
+questions by routing, retrieving, and (optionally) verifying evidence against that wiki.
 
-**ViWikiGraph** converts a single video into a reusable, validated, and evidence-grounded knowledge package before downstream questions are observed. The package combines a human-readable narrative wiki, a KG-oriented wiki, linked visual media, timestamps, provenance records, and typed cross-modal evidence links.
+It runs over three video-QA benchmarks through a common adapter layer:
 
-During question answering, ViWikiGraph retrieves a compact evidence packet and returns an answer with a claim-level evidence trace.
+| Dataset   | Type            | Notes                                            |
+|-----------|-----------------|--------------------------------------------------|
+| TVQA      | MCQ + subtitles | uses provided subtitles and visual concepts      |
+| KnowIT    | MCQ + knowledge | builds a leakage-safe external-knowledge corpus  |
+| NExT-QA   | MCQ             | VidOR-mapped, optional captions                  |
 
-## Overview
+The pipeline supports dataset-provided textual and visual features as well as an
+optional VLM frame-extraction path enabled with `--use-vlm`. It can use either a
+configured OpenAI-compatible API or a local Hugging Face model . When no LLM is enabled, deterministic fallback paths remain available
+for offline testing.
 
-VideoQA evidence is often distributed across subtitles, speech, OCR text, scenes, objects, actions, events, and short temporal intervals. Query-time pipelines repeatedly process this information for each question, making the resulting knowledge difficult to reuse, inspect, and verify.
+Existing VLM-derived knowledge packages can be reused for QA, evaluation,
+ablations, and answer-model comparisons without decoding or processing the videos
+again.
 
-ViWikiGraph instead performs question-independent video-to-wiki construction once and reuses the validated knowledge package across multiple questions.
+## Repository structure
 
-```mermaid
-flowchart LR
-    A[Video + Subtitles/ASR] --> B[Timestamped Multimodal Evidence]
-    B --> C[Narrative Wiki]
-    B --> D[KG-Oriented Wiki]
-    B --> E[Linked Media Repository]
-    C --> F[Pre-Storage Validation]
-    D --> F
-    E --> F
-    F --> G[Validated Video Knowledge Package]
-    G --> H[Cross-Modal Retrieval]
-    H --> I[Answer + Claim-Level Evidence Trace]
-    I --> J[Conditional Verification]
-    J -->|Verified Source Evidence Only| K[Optional Evidence-Gated Refinement]
-````
-
-## Main Components
-
-### 1. Multimodal Evidence Ingestion
-
-The video is decomposed into timestamped evidence units, including:
-
-* Subtitle, ASR, and dialogue spans
-* OCR text
-* Representative frames and scene snapshots
-* Short event clips
-* Entities, objects, actions, and events
-* Visual descriptions and candidate relation triples
-
-### 2. Narrative Wiki
-
-`narrative_wiki.md` provides a human-readable account of the video through:
-
-* Global and scene-level descriptions
-* Localized events and actions
-* Timestamps and temporal intervals
-* Entity and object references
-* Confidence, support, and provenance information
-
-### 3. KG-Oriented Wiki
-
-`kg_wiki.md` provides a structured representation containing:
-
-* Canonical entities and events
-* Subject–predicate–object triples
-* Semantic and temporal relations
-* Links between corresponding narrative and KG entries
-* References to supporting text, timestamps, images, snapshots, and clips
-
-### 4. Cross-Modal Evidence Linking
-
-Shared identifiers and typed links connect narrative claims and KG entries to their supporting:
-
-* Subtitle, ASR, and OCR spans
-* Timestamps and temporal intervals
-* Entity images and scene snapshots
-* Event clips
-* Provenance records
-
-These links allow textual, visual, temporal, and structured evidence to be traced jointly.
-
-### 5. Pre-Storage Validation
-
-Claims, triples, media references, and cross-modal links are checked before becoming persistent knowledge. Unsupported or conflicting items may undergo a bounded local revision or be rejected, reducing the risk of storing ungrounded content.
-
-### 6. Wiki-Grounded QA
-
-For each question, ViWikiGraph retrieves a bounded evidence packet from the validated package. The QA module returns:
-
-* The predicted answer
-* A calibrated confidence score
-* A claim-level evidence trace linking the answer to supporting wiki entries and source evidence
-
-Conditional verification is activated for uncertain, conflicting, or visually ambiguous cases.
-
-### 7. Evidence-Gated Refinement
-
-Refinement is evaluated separately from standard QA. A package update is permitted only when the proposed patch is supported by verifier-confirmed source evidence.
-
-Questions, candidate options, predicted answers, gold answers, and test labels are never treated as evidence for persistent updates.
-
-## Knowledge Package
-
-Each video produces a reusable package containing:
-
-```text
-video_knowledge_package/
-├── narrative_wiki.md
-├── kg_wiki.md
-├── linked_media/
-│   ├── entity_images/
-│   ├── scene_snapshots/
-│   └── event_clips/
-└── cross-modal links, validation metadata, and provenance records
+``` 
+.
+├── viwikigraph/
+│   ├── _init_.py
+│   ├── _main_.py             # python -m viwikigraph
+│   ├── cli.py                  # build/index/qa/eval/report/ablate/stress
+│   ├── config.py
+│   ├── pipeline.py
+│   │
+│   ├── core/
+│   │   ├── schemas.py
+│   │   ├── io.py
+│   │   └── text.py
+│   │
+│   ├── llm/
+│   │   ├── client.py           # API client and response cache
+│   │   ├── local_llama.py      # local Hugging Face Llama backend
+│   │   └── prompts.py
+│   │
+│   ├── datasets/
+│   │   └── adapters.py
+│   │
+│   ├── knowledge/
+│   │   ├── extraction.py
+│   │   ├── vision.py           # VLM frame extraction/descriptions
+│   │   ├── wiki.py
+│   │   ├── kg.py
+│   │   ├── linking.py          # typed cross-modal links
+│   │   ├── validation.py
+│   │   ├── refinement.py       # post-QA package refinement
+│   │   └── corpus.py
+│   │
+│   ├── retrieval/
+│   │   └── index.py
+│   │
+│   └── qa/
+│       ├── answering.py
+│       ├── evaluation.py
+│       └── reporting.py
+│
+├── viwikigraph_eval/           # extended evaluation and audit tooling
+│   ├── runtime_logger.py
+│   ├── retrieval_hooks.py
+│   ├── prediction_hooks.py
+│   ├── corruption.py
+│   ├── refinement_partitions.py
+│   ├── manifest_logger.py
+│   └── audit_templates.py
+│
+├── tests/
+├── scripts/
+│   ├── smoke_llm.py
+│   ├── compare_model_predictions.py
+│   └── run_saved_llama_verification.py
+│
+├── configs/
+│   └── datasets.yaml
+│
+├── docs/
+│   ├── DATA_SETUP.md
+│   ├── RUNNING.md
+│   ├── IMPLEMENTATION_SPEC.md
+│   └── paper/
+│
+├── complete_evaluation_core.py
+├── run_complete_evaluation.py
+├── README.md
+├── LICENSE
+├── .gitignore
+└── pyproject.toml
 ```
 
-The exact serialization of link and provenance records follows the repository configuration.
+Each sub-package re-exports its public symbols, so imports stay stable, e.g.
+`from viwikigraph.qa import answer_question` or `from viwikigraph.datasets import TVQAAdapter`.
 
-## Key Properties
+## Requirements
 
-* **Question-independent:** Constructed without downstream questions or answer labels
-* **Reusable:** One package supports repeated questions about the same video
-* **Cross-modal:** Combines text, visual, temporal, and structured evidence
-* **Validated:** Persistent items are checked before storage
-* **Auditable:** Answer claims can be traced to timestamped source evidence
-* **Efficient:** Offline construction cost is amortized across repeated questions
-* **Leakage-controlled:** Downstream supervision is excluded from construction and refinement
+- **Python ≥ 3.12**
+- The core API-based pipeline uses the Python standard library.
+- **PyYAML is optional.** Without it, configuration files are handled by the built-in minimal YAML parser in `viwikigraph.config`.
+- API-based LLM generation requires a configured API key and endpoint.
+- Local Llama inference requires:
+  - PyTorch with CUDA support
+  - Transformers
+  - Accelerate
+  - A compatible NVIDIA GPU
+  - A locally downloaded model, such as Llama 3.1 8B Instruct
 
-## Results
+The API and local-Llama backends are independent. Local-model dependencies are not required when using the configured API.
 
-ViWikiGraph is evaluated under a common retrieval-augmented protocol without task-specific fine-tuning of the foundation components.
+## Installation
 
-| Dataset    |  Accuracy |
-| ---------- | --------: |
-| TVQA+      | **89.3%** |
-| KnowIT VQA | **86.2%** |
-| NExT-QA    | **82.9%** |
-
-ViWikiGraph achieves state-of-the-art performance among the reimplemented systems under the common evaluation protocol while providing explicit provenance tracking and repeated-use efficiency.
-
-## Evaluation Scope
-
-The evaluation considers more than answer accuracy:
-
-* Overall and question-type accuracy
-* Evidence Recall@K and ranking quality
-* Temporal grounding
-* Answer–evidence support
-* Claim-level trace and citation quality
-* Package validation and provenance quality
-* Robustness to evidence corruption
-* Latency, storage, and repeated-question amortization
-* Leakage-controlled refinement
-
-## Usage Workflow
-
-1. Provide a video and its available subtitle, ASR, or dialogue stream.
-2. Extract timestamped textual, visual, temporal, and structured evidence.
-3. Generate the narrative and KG-oriented Markdown wikis.
-4. Validate claims, triples, media references, and cross-modal links.
-5. Store the retained evidence as a reusable video knowledge package.
-6. Retrieve a compact evidence packet for each downstream question.
-7. Generate an answer with confidence and a claim-level evidence trace.
-8. Optionally apply a source-verified package patch in the separate refinement setting.
-
-## Reproducibility
-
-The release is intended to include:
-
-* Construction and QA configurations
-* Prompts and validation criteria
-* Retrieval and evidence-budget settings
-* Benchmark preprocessing instructions
-* Evaluation scripts
-* Package-quality and provenance metrics
-* Hardware and inference settings
-
-Repository-specific installation commands, model checkpoints, and dataset preparation instructions will be added with the implementation release.
-
-## Citation
-
-Citation information will be added after publication.
-
-## Responsible Use
-
-ViWikiGraph improves evidence organization and traceability but does not guarantee that every generated claim or answer is correct. Outputs should be reviewed before use in high-stakes settings.
-
-Dataset licenses, privacy requirements, and restrictions on processing identifiable video content must be respected.
-
+```bash
+# editable install (optional — the package also runs from the repo root as-is)
+pip install -e .              # add [yaml] for PyYAML, [dev] for pytest:  pip install -e ".[dev]"
 ```
+
+## Configuration
+
+LLM access is configured via environment variables (a local `.env` is auto-loaded):
+
+| Variable                        | Purpose                                    | Default                      |
+|---------------------------------|--------------------------------------------|------------------------------|
+| `AIGCBEST_API_KEY`              | API key (required for live LLM calls)      | —                            |
+| `AIGCBEST_BASE_URL`             | OpenAI-compatible base URL                 | `https://api2.aigcbest.top`  |
+| `AIGCBEST_AUTH_SCHEME`          | optional auth scheme override              | —                            |
+| `VIWIKIGRAPH_MODEL`             | model id (falls back to `AIGCBEST_MODEL`,  | `claude-sonnet-4-6`          |
+|                                 | then `ADAGRAPHLOOM_MODEL`)                  |                              |
+
+Dataset paths, retrieval budgets, and run mode live in `configs/datasets.yaml`; any path can be
+overridden with `{DATASET}_*` environment variables (see `viwikigraph/config.py`).
+
+## Data setup
+
+Datasets are **not** committed (`data/` is gitignored). See **[docs/DATA_SETUP.md](docs/DATA_SETUP.md)**
+for exactly what to download per dataset and where to place it.
+
+## Usage
+
+All commands take `--dataset {tvqa,knowit,nextqa}`, `--split`, and `--experiment-id`; outputs land
+under `{output_root}/{experiment_id}/{dataset}/{split}/`. Sampling flags
+(`--limit` / `--sample-seed` / `--stratify-by`) are deterministic across stages.
+
+```bash
+# 1. build per-video knowledge packages (deterministic; add --use-llm for live generation)
+python -m viwikigraph build  --dataset tvqa --split val --experiment-id exp1 --limit 50 --use-llm
+
+# 2. answer questions over the built packages
+python -m viwikigraph qa     --dataset tvqa --split val --experiment-id exp1 --limit 50 --mode mcq --use-llm
+
+# 3. score predictions against gold labels
+python -m viwikigraph eval   --dataset tvqa --split val --experiment-id exp1 --limit 50
+
+# 4. assemble report.md + run_config.json
+python -m viwikigraph report --dataset tvqa --split val --experiment-id exp1 --limit 50
 ```
+
+Additional commands: `index` (rebuild retrieval indexes), `ablate --variant …`
+(e.g. `no_narrative`, `no_kg`,`no_cross_modal_links`, `no_pre_storage_validation`, `no_media`,
+`no_provenance`, and `flat_markdown`.), and `stress --setting … --level …`
+(degraded-evidence robustness tests). Run `python -m viwikigraph <command> --help` for flags.
+
+After an editable install you can also use the `viwikigraph` console script in place of
+`python -m viwikigraph`.
+
+## Testing
+
+```bash
+pytest            
+```
+
+## Documentation
+
+- [docs/DATA_SETUP.md](docs/DATA_SETUP.md) — dataset downloads and layout
+- [docs/RUNNING.md](docs/RUNNING.md) — end-to-end run instructions for each dataset
+
